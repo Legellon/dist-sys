@@ -1,5 +1,5 @@
 use crate::{IdGen, LocalUniq, Message, Node, NodeBase, PayloadLinker};
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{collections::HashMap, io::Write};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -24,7 +24,7 @@ pub enum BroadcastPayload<T: Eq> {
 pub struct BroadcastNode<Init, Id, M>
 where
     Init: Default,
-    Id: Clone + Default + LocalUniq,
+    Id: DeserializeOwned + Default + LocalUniq,
     M: Eq + Serialize,
 {
     base: NodeBase<Init, Id>,
@@ -38,7 +38,7 @@ where
 impl<T, I, M> IdGen<I> for BroadcastNode<T, I, M>
 where
     T: Default,
-    I: Clone + Default + LocalUniq,
+    I: DeserializeOwned + Default + LocalUniq,
     M: Eq + Default + Serialize,
 {
     fn gen_id(&mut self) -> I {
@@ -49,7 +49,7 @@ where
 impl<Init, Id, M> Node<Id> for BroadcastNode<Init, Id, M>
 where
     Init: Default,
-    Id: Clone + Default + Serialize + LocalUniq,
+    Id: DeserializeOwned + Default + Serialize + LocalUniq,
     M: Clone + Eq + Default + Serialize,
 {
     type Init = Init;

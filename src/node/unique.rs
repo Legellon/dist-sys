@@ -1,6 +1,6 @@
 use crate::{IdGen, Init, LocalUniq, Message, Node, NodeBase, PayloadLinker};
 use anyhow::anyhow;
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 pub struct UniqueNode<Init, Id: Default>
 where
@@ -39,7 +39,7 @@ where
 
 impl<I: Default> Node<I> for UniqueNode<Init, I>
 where
-    I: LocalUniq + Serialize + Clone,
+    I: LocalUniq + Serialize + DeserializeOwned,
 {
     type Init = Init;
     type Payload = UniquePayload<String>;

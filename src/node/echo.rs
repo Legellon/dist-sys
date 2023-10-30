@@ -1,6 +1,6 @@
 use crate::{IdGen, LocalUniq, Message, Node, NodeBase, PayloadLinker};
 use anyhow::Context;
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::io::Write;
 
 pub struct EchoNode<Init, Id: Default>
@@ -34,7 +34,7 @@ impl<Init, Id: Default + LocalUniq> IdGen<Id> for EchoNode<Init, Id> {
 
 impl<T, I> Node<I> for EchoNode<T, I>
 where
-    I: Clone + Serialize + LocalUniq + Default,
+    I: DeserializeOwned + Serialize + LocalUniq + Default,
     T: Default,
 {
     type Init = T;

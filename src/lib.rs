@@ -1,7 +1,7 @@
 pub mod node;
 
 use anyhow::{anyhow, Context};
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{
     fmt::{Debug, Display},
     io::{BufRead, Write},
@@ -25,11 +25,11 @@ impl<Init, Id: LocalUniq + Default> NodeBase<Init, Id> {
     }
 }
 
-pub trait NodeBuilder<I: Clone, N: Node<I>> {
+pub trait NodeBuilder<I: DeserializeOwned, N: Node<I>> {
     fn to_node(&self) -> anyhow::Result<N>;
 }
 
-impl<I: Clone, N> NodeBuilder<I, N> for Message<I, InitPayload>
+impl<I: DeserializeOwned, N> NodeBuilder<I, N> for Message<'_, I, InitPayload>
 where
     N: Node<I, Init = Init>,
 {
@@ -44,7 +44,7 @@ where
     }
 }
 
-pub trait Node<MI: Clone>: IdGen<MI> + Default {
+pub trait Node<MI: DeserializeOwned>: IdGen<MI> + Default {
     type Init;
     type Payload;
 
@@ -55,28 +55,31 @@ pub trait Node<MI: Clone>: IdGen<MI> + Default {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Body<Id: Clone, Payload> {
+pub struct Body<'a, Id, Payload> {
     #[serde(rename = "msg_id")]
     id: Option<Id>,
-    in_reply_to: Option<Id>,
+    #[serde(bound(deserialize = "&'a Id: Deserialize<'a>"))]
+    in_reply_to: Option<&'a Id>,
     #[serde(flatten)]
     payload: Payload,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Message<Id: Clone, Payload> {
-    src: String,
+pub struct Message<'a, Id, Payload> {
+    src: &'a str,
     #[serde(rename = "dest")]
-    dst: String,
-    body: Body<Id, Payload>,
+    dst: &'a str,
+    body: Body<'a, Id, Payload>,
     #[serde(skip)]
     linked: bool,
 }
 
 pub trait PayloadLinker<Id, Payload> {
-    type Output;
+    type Output<'a>
+    where
+        Self: 'a;
 
-    fn link(&self, id: Id, payload: Payload) -> Self::Output;
+    fn link(&self, id: Id, payload: Payload) -> Self::Output<'_>;
 }
 
 pub trait LocalUniq: Display {
@@ -106,16 +109,16 @@ impl LocalUniq for usize {
     }
 }
 
-impl<I: Clone, OP, IP> PayloadLinker<I, OP> for Message<I, IP> {
-    type Output = Message<I, OP>;
+impl<I: DeserializeOwned, OP, IP> PayloadLinker<I, OP> for Message<'_, I, IP> {
+    type Output<'a> = Message<'a, I, OP> where Self: 'a;
 
-    fn link(&self, id: I, payload: OP) -> Self::Output {
+    fn link(&self, id: I, payload: OP) -> Self::Output<'_> {
         Message {
-            src: self.dst.clone(),
-            dst: self.src.clone(),
+            src: self.dst,
+            dst: self.src,
             body: Body {
                 id: Some(id),
-                in_reply_to: self.body.id.clone(),
+                in_reply_to: self.body.id.as_ref(),
                 payload,
             },
             linked: true,
@@ -123,9 +126,9 @@ impl<I: Clone, OP, IP> PayloadLinker<I, OP> for Message<I, IP> {
     }
 }
 
-impl<I, P> Message<I, P>
+impl<I, P> Message<'_, I, P>
 where
-    I: Clone + Serialize,
+    I: DeserializeOwned + Serialize,
     P: Serialize,
 {
     fn send(&self, out: &mut impl Write) -> anyhow::Result<()> {
@@ -148,20 +151,21 @@ pub enum InitPayload {
 
 pub fn main_loop<Id, N: Node<Id, Init = Init>>() -> anyhow::Result<()>
 where
-    N::Payload: for<'a> Deserialize<'a>,
-    Id: for<'a> Deserialize<'a> + Serialize + Clone + LocalUniq,
+    N::Payload: DeserializeOwned,
+    Id: DeserializeOwned + Serialize + AsRef<Id> + LocalUniq,
 {
     let stdin = std::io::stdin().lock();
     let mut stdin = stdin.lines();
 
     let mut stdout = std::io::stdout().lock();
 
-    let init_msg: Message<Id, InitPayload> = serde_json::from_str(
-        &stdin
-            .next()
-            .expect("at least one message should be received (init)")?,
-    )
-    .context("failed to deserialize init message")?;
+    // We must to create a binding variable,
+    // because we need to stick a ref to specific lifetime.
+    let init_str = &stdin
+        .next()
+        .expect("at least one message should be received (init)")?;
+    let init_msg: Message<Id, InitPayload> =
+        serde_json::from_str(init_str).context("failed to deserialize init message")?;
 
     let mut node: N = init_msg.to_node()?;
     init_msg
